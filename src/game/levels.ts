@@ -125,3 +125,18 @@ export const ENEMY_STATS: Record<
   power: { hp: 1, speed: 58, bullet: 260, fireRate: 1.25, score: 300 },
   armor: { hp: 4, speed: 44, bullet: 180, fireRate: 0.8, score: 400 },
 };
+
+/* -------- сложность -------- */
+export type Difficulty = "easy" | "normal" | "hard";
+
+export const DIFF: Record<
+  Difficulty,
+  { label: string; hint: string; speedMul: number; fireMul: number; spawnMul: number; lives: number }
+> = {
+  easy:   { label: "НОВОБРАНЕЦ", hint: "4 жизни, враги медленнее и ленивее", speedMul: 0.85, fireMul: 0.7, spawnMul: 1.3, lives: 4 },
+  normal: { label: "СОЛДАТ", hint: "классика: 3 жизни, честный бой", speedMul: 1, fireMul: 1, spawnMul: 1, lives: 3 },
+  hard:   { label: "ВЕТЕРАН", hint: "2 жизни, враги быстрые и злые", speedMul: 1.12, fireMul: 1.3, spawnMul: 0.8, lives: 2 },
+};
+
+/* -------- ночные этапы: каждый 3-й из пяти -------- */
+export const isNight = (stage: number) => ((stage - 1) % 5) === 2;

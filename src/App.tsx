@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Engine, type HudSnapshot } from "./game/engine";
 import { drawChihuahua } from "./game/sprites";
-import { ENEMY_STATS, type EnemyKind } from "./game/levels";
+import { ENEMY_STATS, DIFF, type EnemyKind, type Difficulty } from "./game/levels";
 import { chip } from "./game/audio";
 
 /* ================= вспомогательные компоненты ================= */
@@ -104,7 +104,7 @@ function ControlsGuide({ compact = false }: { compact?: boolean }) {
   );
 }
 
-function MenuScreen({ onStart, hi }: { onStart: () => void; hi: number }) {
+function MenuScreen({ hud, onStart, onDiff }: { hud: HudSnapshot; onStart: () => void; onDiff: (d: Difficulty) => void }) {
   return (
     <div className="absolute inset-0 z-20 flex flex-col items-center justify-center bg-[rgba(5,6,3,0.88)] fade-in px-4">
       <div className="pop-in flex flex-col items-center">
@@ -130,12 +130,39 @@ function MenuScreen({ onStart, hi }: { onStart: () => void; hi: number }) {
         В БОЙ <span className="blink-soft">▸</span>
       </button>
       <div className="blink-hard mt-2 text-[11px] tracking-[0.25em] text-armor-400 font-display">НАЖМИ ENTER</div>
-      <div className="mt-5"><ControlsGuide /></div>
-      {hi > 0 && (
-        <div className="mt-4 text-[12px] tracking-widest text-armor-400">
-          РЕКОРД: <span className="text-flare-300 font-display">{hi}</span>
+
+      {/* сложность */}
+      <div className="mt-5 flex flex-col items-center gap-2">
+        <span className="font-display text-[10px] tracking-[0.35em] text-armor-500">СЛОЖНОСТЬ</span>
+        <div className="flex gap-2">
+          {(Object.keys(DIFF) as Difficulty[]).map((d) => {
+            const active = hud.difficulty === d;
+            return (
+              <button
+                key={d}
+                onClick={() => onDiff(d)}
+                title={DIFF[d].hint}
+                className={`touch-btn border px-3 py-1.5 font-display text-[11px] tracking-widest transition-all ${
+                  active
+                    ? "border-flare-500 bg-flare-500/15 text-flare-400 shadow-[0_0_14px_rgba(255,157,46,0.35)]"
+                    : "border-armor-600 text-armor-400 hover:border-armor-400 hover:text-armor-200"
+                }`}
+              >
+                {DIFF[d].label}
+              </button>
+            );
+          })}
         </div>
-      )}
+        <span className="text-[11px] text-armor-500">{DIFF[hud.difficulty].hint}</span>
+      </div>
+
+      <div className="mt-4"><ControlsGuide /></div>
+      <div className="mt-4 flex items-center gap-5 text-[12px] tracking-widest text-armor-400">
+        <span>РЕКОРД: <span className="text-flare-300 font-display">{hud.hi}</span></span>
+        {hud.bestStage > 0 && (
+          <span>ДОШЁЛ ДО ЭТАПА <span className="text-flare-300 font-display">{hud.bestStage}</span></span>
+        )}
+      </div>
     </div>
   );
 }
@@ -200,6 +227,12 @@ function StageClearScreen({ hud, onNext }: { hud: HudSnapshot; onNext: () => voi
           </div>
           <div className="flex justify-between text-[12px] text-armor-400">
             <span>БОНУС ЭТАПА</span><span className="text-flare-300">+{hud.stage * 500}</span>
+          </div>
+          <div className="flex justify-between text-[12px] text-armor-400">
+            <span>ВРЕМЯ БОЯ</span><span className="text-armor-200 font-display">{hud.stageTime}с</span>
+          </div>
+          <div className="flex justify-between text-[12px] text-armor-400">
+            <span>ТОЧНОСТЬ ОГНЯ</span><span className="text-armor-200 font-display">{hud.accuracy}%</span>
           </div>
         </div>
         <button onClick={onNext} className="touch-btn mt-5 w-full border-2 border-flare-500 py-2 font-display text-flare-400 hover:bg-flare-500 hover:text-armor-950 transition-colors">
@@ -307,6 +340,8 @@ const initialHud: HudSnapshot = {
   power: 0, muted: false, frozenT: 0, shovelT: 0, shieldT: 0,
   killed: { basic: 0, fast: 0, power: 0, armor: 0 },
   gameOverReason: null, newRecord: false,
+  difficulty: "normal", musicOn: true, danger: 0, stageTime: 0,
+  accuracy: 0, bestStage: 0, combo: 0, night: false,
 };
 
 export default function App() {
@@ -340,6 +375,8 @@ export default function App() {
     chip.setMuted(!chip.muted);
     engineRef.current?.pushHud();
   }, []);
+  const toggleMusic = useCallback(() => engineRef.current?.toggleMusic(), []);
+  const setDiff = useCallback((d: Difficulty) => engineRef.current?.setDifficulty(d), []);
 
   const enemyIcons = Math.max(0, Math.min(20, hud.enemiesLeft));
   const inBattle = hud.state === "playing" || hud.state === "paused";
@@ -374,6 +411,13 @@ export default function App() {
             >
               {hud.muted ? "ЗВУК: ВЫКЛ" : "ЗВУК: ВКЛ"}
             </button>
+            <button
+              onClick={toggleMusic}
+              className="touch-btn bezel px-3 py-2 font-display text-[11px] tracking-widest text-armor-200 hover:text-flare-400 transition-colors"
+              title="Фоновая музыка"
+            >
+              {hud.musicOn ? "МУЗЫКА: ВКЛ" : "МУЗЫКА: ВЫКЛ"}
+            </button>
             {hud.state === "playing" && (
               <button
                 onClick={resume}
@@ -388,7 +432,11 @@ export default function App() {
         {/* ======= игровая зона ======= */}
         <main className="flex flex-1 flex-col items-center gap-4 lg:flex-row lg:items-start lg:justify-center">
           <div className="bezel relative p-2.5 sm:p-3">
-            <div className="relative overflow-hidden border border-armor-700 bg-black shadow-[inset_0_0_40px_rgba(0,0,0,0.8)]">
+            <div
+              className={`relative overflow-hidden border bg-black shadow-[inset_0_0_40px_rgba(0,0,0,0.8)] transition-colors duration-200 ${
+                hud.danger > 0.25 && inBattle ? "border-alert-500 danger-glow" : "border-armor-700"
+              }`}
+            >
               <canvas
                 ref={canvasRef}
                 className="pixel-canvas block h-auto w-[min(88vw,56vh)] sm:w-[min(70vw,62vh)]"
@@ -399,7 +447,7 @@ export default function App() {
               <div className="crt-vignette pointer-events-none absolute inset-0" />
               <div className="crt-flicker crt-vignette pointer-events-none absolute inset-0" />
 
-              {hud.state === "menu" && <MenuScreen onStart={start} hi={hud.hi} />}
+              {hud.state === "menu" && <MenuScreen hud={hud} onStart={start} onDiff={setDiff} />}
               {hud.state === "intermission" && <IntermissionScreen stage={hud.stage} />}
               {hud.state === "paused" && (
                 <PauseScreen onResume={resume} onMenu={toMenu} />
@@ -465,12 +513,26 @@ export default function App() {
               <div>
                 <div className="font-display text-[11px] tracking-[0.25em] text-armor-400">СЧЁТ</div>
                 <div className="font-display text-2xl text-hull-400 leading-tight">{hud.score}</div>
+                {hud.combo >= 2 && (
+                  <div className="font-display text-[12px] tracking-widest text-[#8fd8e8] pop-in">
+                    СЕРИЯ ×{hud.combo}
+                  </div>
+                )}
               </div>
               <div className="text-right">
                 <div className="font-display text-[11px] tracking-[0.25em] text-armor-400">РЕКОРД</div>
                 <div className="font-display text-lg text-armor-300 leading-tight">{hud.hi}</div>
               </div>
             </div>
+            <div className="mt-2 flex justify-between text-[11px] text-armor-500">
+              <span>ВРЕМЯ <span className="font-display text-armor-300">{hud.stageTime}с</span></span>
+              <span>ТОЧНОСТЬ <span className="font-display text-armor-300">{hud.accuracy}%</span></span>
+            </div>
+            {hud.night && inBattle && (
+              <div className="mt-1.5 text-center font-display text-[10px] tracking-[0.3em] text-[#8fb8e8]">
+                ◐ НОЧНОЙ БОЙ
+              </div>
+            )}
 
             <div className="my-3 h-px bg-armor-700" />
 
@@ -487,6 +549,12 @@ export default function App() {
               <div className={`flex items-center justify-between ${hud.shieldT > 0 ? "text-[#8fd8e8]" : "text-armor-600"}`}>
                 <span className="font-display tracking-widest text-[10px]">ЩИТ</span>
                 <span className="font-display">{hud.shieldT > 0 ? `${hud.shieldT}с` : "——"}</span>
+              </div>
+              <div className={`flex items-center justify-between ${hud.danger > 0.25 ? "text-alert-400" : "text-armor-600"}`}>
+                <span className="font-display tracking-widest text-[10px]">ТРЕВОГА ШТАБА</span>
+                <span className={`font-display ${hud.danger > 0.25 ? "blink-hard" : ""}`}>
+                  {hud.danger > 0.66 ? "КРИТИЧЕСКАЯ" : hud.danger > 0.25 ? "АТАКА!" : "——"}
+                </span>
               </div>
             </div>
 

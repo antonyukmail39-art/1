@@ -50,6 +50,8 @@ const TAIL_B = ["....", ".TD.", "..TD", "..D."];
 const EYE_ROWS = [5];
 const EYE_COLS = [4, 11];
 
+export type ChiMood = "calm" | "danger" | "happy";
+
 function drawMap(
   ctx: CanvasRenderingContext2D,
   map: string[],
@@ -75,6 +77,7 @@ export interface ChiOpts {
   alive: boolean;
   t: number; // игровое время, сек
   u?: number; // размер юнита (по умолчанию 2)
+  mood?: ChiMood;
 }
 
 /** Рисует чихуахуа в прямоугольнике 16u × 16u с координатой (x, y). */
@@ -82,25 +85,46 @@ export function drawChihuahua(
   ctx: CanvasRenderingContext2D,
   x: number,
   y: number,
-  { alive, t, u = 2 }: ChiOpts,
+  { alive, t, u = 2, mood = "calm" }: ChiOpts,
 ) {
   const pal = alive ? CHI_PAL : CHI_PAL_DEAD;
-  const map = CHI_BODY.map((r) => r);
 
-  drawMap(ctx, map, x, y, u, pal);
+  /* тревога: мелкая дрожь всем телом */
+  let dx = 0, dy = 0;
+  if (alive && mood === "danger") {
+    dx = Math.round(Math.sin(t * 42) * 1);
+    dy = Math.round(Math.cos(t * 37) * 0.6);
+  }
 
-  /* хвостик */
-  const wag = Math.floor(t * 4) % 2 === 0 ? TAIL_A : TAIL_B;
-  drawMap(ctx, wag, x + 12 * u, y + 9 * u, u, pal);
+  drawMap(ctx, CHI_BODY, x + dx, y + dy, u, pal);
+
+  /* хвостик: в радости виляет вдвое быстрее */
+  const wagSpeed = alive && mood === "happy" ? 13 : 4;
+  const wag = Math.floor(t * wagSpeed) % 2 === 0 ? TAIL_A : TAIL_B;
+  drawMap(ctx, wag, x + 12 * u + dx, y + 9 * u + dy, u, pal);
 
   if (alive) {
-    /* моргание раз в ~3.2с */
-    const blink = t % 3.2 < 0.12;
+    /* моргание раз в ~3.2с (в тревоге — чаще) */
+    const period = mood === "danger" ? 1.4 : 3.2;
+    const blink = t % period < 0.12;
     if (blink) {
       ctx.fillStyle = pal.T;
       for (const er of EYE_ROWS)
         for (const ec of EYE_COLS)
-          ctx.fillRect(x + ec * u, y + er * u, u, u);
+          ctx.fillRect(x + ec * u + dx, y + er * u + dy, u, u);
+    }
+    /* в тревоге — расширенные зрачки-точки поверх */
+    if (mood === "danger" && !blink) {
+      ctx.fillStyle = pal.K;
+      for (const ec of EYE_COLS)
+        ctx.fillRect(x + ec * u + dx, y + 5 * u + dy, Math.ceil(u * 0.7), Math.ceil(u * 0.7));
+    }
+    /* в радости — розовые щёчки и высунутый язычок */
+    if (mood === "happy") {
+      ctx.fillStyle = "#e8a3a3";
+      ctx.fillRect(x + 3 * u, y + 6 * u, u, u);
+      ctx.fillRect(x + 12 * u, y + 6 * u, u, u);
+      if (Math.floor(t * 6) % 2 === 0) ctx.fillRect(x + 7 * u, y + 7 * u, 2 * u, u);
     }
   } else {
     /* крестики вместо глаз + высунутый язычок */

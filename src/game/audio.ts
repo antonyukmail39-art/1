@@ -2,6 +2,20 @@
 
 type OscType = OscillatorType;
 
+/* простой марш-луп: бас + редкая мелодия + хэт (оригинальная последовательность) */
+const BASS_LINE = [
+  110, 0, 110, 0, 110, 0, 130.81, 0,
+  98, 0, 98, 0, 98, 0, 146.83, 0,
+  110, 0, 110, 0, 110, 0, 130.81, 0,
+  164.81, 0, 146.83, 0, 130.81, 0, 98, 0,
+];
+const LEAD_LINE = [
+  0, 0, 440, 0, 0, 523.25, 0, 440,
+  0, 0, 392, 0, 0, 0, 0, 0,
+  0, 0, 440, 0, 0, 523.25, 0, 659.25,
+  0, 523.25, 440, 0, 392, 0, 0, 0,
+];
+
 class Chip {
   private ctx: AudioContext | null = null;
   private master: GainNode | null = null;
@@ -9,11 +23,19 @@ class Chip {
   private humNode: { osc: OscillatorNode; gain: GainNode } | null = null;
   muted = false;
 
+  musicEnabled = true;
+  private musicWanted = false;
+  private musicTimer: ReturnType<typeof setInterval> | null = null;
+  private mStep = 0;
+  private mNext = 0;
+
   constructor() {
     try {
       this.muted = localStorage.getItem("sp_muted") === "1";
+      this.musicEnabled = localStorage.getItem("sp_music") !== "0";
     } catch {
       this.muted = false;
+      this.musicEnabled = true;
     }
   }
 
@@ -34,6 +56,8 @@ class Chip {
     this.noiseBuf = this.ctx.createBuffer(1, len, this.ctx.sampleRate);
     const d = this.noiseBuf.getChannelData(0);
     for (let i = 0; i < len; i++) d[i] = Math.random() * 2 - 1;
+
+    if (this.musicWanted && this.musicEnabled) this.startMusicTimer();
   }
 
   setMuted(m: boolean) {
@@ -56,6 +80,11 @@ class Chip {
   ) {
     if (!this.ctx || !this.master) return;
     const t = this.ctx.currentTime + delay;
+    this.noteAt(type, f0, f1, t, dur, vol);
+  }
+
+  private noteAt(type: OscType, f0: number, f1: number, t: number, dur: number, vol: number) {
+    if (!this.ctx || !this.master) return;
     const osc = this.ctx.createOscillator();
     const g = this.ctx.createGain();
     osc.type = type;
@@ -125,11 +154,20 @@ class Chip {
     this.bigBoom();
     this.tone("sawtooth", 300, 40, 0.9, 0.3, 0.1);
   }
+  /** чихуахуа лает: два коротких нисходящих «гав» */
+  bark() {
+    this.tone("square", 760, 340, 0.07, 0.13);
+    this.tone("square", 640, 260, 0.1, 0.13, 0.1);
+  }
+  /** поскуливание при потере штаба */
+  whimper() {
+    [520, 430, 330].forEach((f, i) => this.tone("triangle", f, f * 0.9, 0.16, 0.11, 0.45 + i * 0.17));
+  }
 
   /* -------- гул двигателя игрока -------- */
   hum(on: boolean) {
     if (!this.ctx || !this.master) return;
-    if (on && !this.hum) {
+    if (on && !this.humNode) {
       const osc = this.ctx.createOscillator();
       const g = this.ctx.createGain();
       osc.type = "sawtooth";
@@ -147,6 +185,62 @@ class Chip {
         setTimeout(() => { try { h.osc.stop(); } catch { /* ok */ } }, 300);
       }
     }
+  }
+
+  /* -------- фоновая музыка -------- */
+  setMusicEnabled(m: boolean) {
+    this.musicEnabled = m;
+    try { localStorage.setItem("sp_music", m ? "1" : "0"); } catch { /* ignore */ }
+    if (!m) this.stopMusicTimer();
+    else if (this.musicWanted && this.ctx) this.startMusicTimer();
+  }
+
+  setMusic(on: boolean) {
+    this.musicWanted = on;
+    if (on && this.musicEnabled && this.ctx) this.startMusicTimer();
+    else if (!on) this.stopMusicTimer();
+  }
+
+  private startMusicTimer() {
+    if (this.musicTimer || !this.ctx) return;
+    this.mNext = this.ctx.currentTime + 0.1;
+    this.musicTimer = setInterval(() => this.pumpMusic(), 60);
+  }
+
+  private stopMusicTimer() {
+    if (this.musicTimer) {
+      clearInterval(this.musicTimer);
+      this.musicTimer = null;
+    }
+  }
+
+  private pumpMusic() {
+    if (!this.ctx || !this.master) { this.stopMusicTimer(); return; }
+    while (this.mNext < this.ctx.currentTime + 0.18) {
+      const s = this.mStep % BASS_LINE.length;
+      const bass = BASS_LINE[s];
+      if (bass) this.noteAt("square", bass, bass, this.mNext, 0.16, 0.05);
+      const lead = LEAD_LINE[s];
+      if (lead) this.noteAt("triangle", lead, lead, this.mNext, 0.15, 0.045);
+      if (s % 2 === 1) this.noiseAt(this.mNext);
+      this.mNext += 0.21;
+      this.mStep++;
+    }
+  }
+
+  private noiseAt(t: number) {
+    if (!this.ctx || !this.master || !this.noiseBuf) return;
+    const src = this.ctx.createBufferSource();
+    src.buffer = this.noiseBuf;
+    const f = this.ctx.createBiquadFilter();
+    f.type = "highpass";
+    f.frequency.value = 6000;
+    const g = this.ctx.createGain();
+    g.gain.setValueAtTime(0.018, t);
+    g.gain.exponentialRampToValueAtTime(0.0001, t + 0.035);
+    src.connect(f).connect(g).connect(this.master);
+    src.start(t);
+    src.stop(t + 0.05);
   }
 }
 

@@ -1,6 +1,6 @@
 import { chip } from "./audio";
-import { MAPS, buildWave, BONUS_INDEXES, ENEMY_STATS, type EnemyKind } from "./levels";
-import { drawChihuahua } from "./sprites";
+import { MAPS, buildWave, BONUS_INDEXES, ENEMY_STATS, DIFF, isNight, type EnemyKind, type Difficulty } from "./levels";
+import { drawChihuahua, type ChiMood } from "./sprites";
 
 /* ============================== типы ============================== */
 
@@ -27,6 +27,14 @@ export interface HudSnapshot {
   killed: Record<EnemyKind, number>;
   gameOverReason: "lives" | "base" | null;
   newRecord: boolean;
+  difficulty: Difficulty;
+  musicOn: boolean;
+  danger: number;
+  stageTime: number;
+  accuracy: number;
+  bestStage: number;
+  combo: number;
+  night: boolean;
 }
 
 type Dir = 0 | 1 | 2 | 3; // вверх, вправо, вниз, влево
@@ -124,6 +132,19 @@ export class Engine {
   private gameOverReason: "lives" | "base" | null = null;
   private newRecord = false;
 
+  private difficulty: Difficulty = "normal";
+  private bestStage = 0;
+  private night = false;
+  private stageTime = 0;
+  private shotsFired = 0;
+  private shotsHit = 0;
+  private comboN = 0;
+  private comboT = 0;
+  private danger = 0;
+  private barkCd = 0;
+  private lastLight: [number, number] = [144, 360];
+  private ringSet = new Set<number>();
+
   private baseAlive = true;
   private freezeT = 0;
   private shovelT = 0;
@@ -158,6 +179,12 @@ export class Engine {
     canvas.width = FIELD;
     canvas.height = FIELD;
     try { this.hi = Number(localStorage.getItem("sp_hi") ?? 0) || 0; } catch { this.hi = 0; }
+    try {
+      const d = localStorage.getItem("sp_diff");
+      if (d === "easy" || d === "normal" || d === "hard") this.difficulty = d;
+    } catch { /* ignore */ }
+    try { this.bestStage = Number(localStorage.getItem("sp_best_stage") ?? 0) || 0; } catch { this.bestStage = 0; }
+    for (const [rx, ry] of RING) this.ringSet.add(ry * G + rx);
 
     window.addEventListener("keydown", this.onKeyDown);
     window.addEventListener("keyup", this.onKeyUp);
@@ -195,6 +222,7 @@ export class Engine {
       if (this.state === "menu") this.startGame();
       else if (this.state === "stageclear") this.nextStage();
       else if (this.state === "gameover") this.startGame();
+      else if (this.state === "intermission") this.interT = 0; // пропустить заставку
     }
   };
 
@@ -203,6 +231,20 @@ export class Engine {
 
   setTouchDir(d: Dir | null) { this.touchDir = d; chip.unlock(); }
   setTouchFire(f: boolean) { this.touchFire = f; chip.unlock(); }
+
+  setDifficulty(d: Difficulty) {
+    this.difficulty = d;
+    try { localStorage.setItem("sp_diff", d); } catch { /* ignore */ }
+    chip.unlock();
+    chip.uiMove();
+    this.pushHud();
+  }
+
+  toggleMusic() {
+    chip.unlock();
+    chip.setMusicEnabled(!chip.musicEnabled);
+    this.pushHud();
+  }
 
   togglePause() {
     if (this.state === "playing") {
@@ -219,7 +261,7 @@ export class Engine {
 
   startGame() {
     this.score = 0;
-    this.lives = 3;
+    this.lives = DIFF[this.difficulty].lives;
     this.stage = 1;
     this.playerPower = 0;
     this.gameOverReason = null;
@@ -380,6 +422,27 @@ export class Engine {
       if (this.respawnT <= 0) { this.respawnT = -1; this.spawnPlayer(); }
     }
 
+    /* -------- время, серии, тревога -------- */
+    this.stageTime += dt;
+    if (this.comboT > 0) {
+      this.comboT -= dt;
+      if (this.comboT <= 0) this.comboN = 0;
+    }
+    this.barkCd = Math.max(0, this.barkCd - dt);
+    const bcx = BASE_X + 16, bcy = BASE_Y + 16;
+    let dTarget = 0;
+    for (const t of this.tanks) {
+      if (t.isPlayer || !t.alive || t.spawnT > 0) continue;
+      const d = Math.hypot(t.x + 16 - bcx, t.y + 16 - bcy);
+      if (d < 130) dTarget = Math.max(dTarget, 1 - d / 130);
+    }
+    for (const b of this.bullets) {
+      if (b.fromPlayer || b.dead) continue;
+      const d = Math.hypot(b.x - bcx, b.y - bcy);
+      if (d < 90) dTarget = Math.max(dTarget, 1 - d / 90);
+    }
+    this.danger = Math.max(dTarget, this.danger - dt * 0.7);
+
     /* -------- подкрепления врагов -------- */
     const aliveEnemies = this.tanks.filter((t) => !t.isPlayer && t.alive).length;
     if (this.queue.length > 0 && aliveEnemies < 4) {
@@ -421,13 +484,17 @@ export class Engine {
     chip.hum(!!pl && pl.alive && (Math.abs(pl.vx) > 4 || Math.abs(pl.vy) > 4));
 
     /* -------- HUD-тики -------- */
-    const secs = `${Math.ceil(this.freezeT)}|${Math.ceil(this.shovelT)}|${Math.ceil(pl?.shieldT ?? 0)}`;
+    const secs = `${Math.ceil(this.freezeT)}|${Math.ceil(this.shovelT)}|${Math.ceil(pl?.shieldT ?? 0)}|${Math.ceil(this.stageTime)}|${Math.round(this.danger * 4)}|${this.comboN}`;
     if (secs !== this.lastIntSec) { this.lastIntSec = secs; this.pushHud(); }
 
     /* -------- этап пройден? -------- */
     if (this.queue.length === 0 && this.tanks.filter((t) => !t.isPlayer && t.alive).length === 0) {
       this.state = "stageclear";
       this.clearT = 0;
+      if (this.stage > this.bestStage) {
+        this.bestStage = this.stage;
+        try { localStorage.setItem("sp_best_stage", String(this.bestStage)); } catch { /* ignore */ }
+      }
       const bonus = this.stage * 500;
       this.score += bonus;
       chip.stageClear();
@@ -495,7 +562,7 @@ export class Engine {
       t.aiT = 0.7 + rnd() * 1.9;
     }
     const st = ENEMY_STATS[t.kind as EnemyKind];
-    if (t.cooldown <= 0 && rnd() < st.fireRate * dt) this.tryFire(t);
+    if (t.cooldown <= 0 && rnd() < st.fireRate * dt * DIFF[this.difficulty].fireMul) this.tryFire(t);
   }
 
   private pickEnemyDir(t: Tank, blocked: boolean) {
@@ -570,6 +637,7 @@ export class Engine {
       if (mine.length >= max || t.cooldown > 0) return;
       const speed = this.playerPower >= 1 ? 340 : 262;
       this.spawnBullet(t, speed, 1 + this.playerPower);
+      this.shotsFired++;
       t.cooldown = 0.16;
       chip.shoot();
     } else {
@@ -637,6 +705,7 @@ export class Engine {
         this.grid[idx] = T_EMPTY;
         hitBrick = true;
         this.sparks(cx * TS + 8, cy * TS + 8, 5, "#c05a30");
+        if (this.ringSet.has(idx)) this.fortressAlarm();
       } else if (t === T_STEEL) {
         if (b.power >= 4) {
           this.grid[idx] = T_EMPTY;
@@ -662,6 +731,20 @@ export class Engine {
         else this.hitEnemy(t);
         return;
       }
+    }
+    /* вражеский снаряд свистит рядом со штабом — чихуахуа предупреждает */
+    if (!b.fromPlayer) {
+      const d = Math.hypot(b.x - (BASE_X + 16), b.y - (BASE_Y + 16));
+      if (d < 46) this.fortressAlarm();
+    }
+  }
+
+  private fortressAlarm() {
+    this.danger = 1;
+    if (this.barkCd <= 0) {
+      this.barkCd = 1.3;
+      chip.bark();
+      this.shake = Math.max(this.shake, 2);
     }
   }
 
@@ -705,11 +788,20 @@ export class Engine {
   private hitEnemy(t: Tank) {
     t.hp--;
     t.flashT = 0.12;
+    this.shotsHit++;
     if (t.hp <= 0) {
       t.alive = false;
       const st = ENEMY_STATS[t.kind as EnemyKind];
       this.kills[t.kind as EnemyKind]++;
       this.score += st.score;
+      if (this.comboT > 0) this.comboN++;
+      else this.comboN = 1;
+      this.comboT = 2.5;
+      if (this.comboN >= 2) {
+        const cb = 100 * (this.comboN - 1);
+        this.score += cb;
+        this.popup(t.x + 16, t.y - 8, `СЕРИЯ ×${this.comboN} +${cb}`, "#8fd8e8");
+      }
       this.explode(t.x + 16, t.y + 16, false);
       chip.smallBoom();
       this.shake = Math.max(this.shake, 4);
@@ -728,6 +820,7 @@ export class Engine {
     this.baseAlive = false;
     this.explode(BASE_X + 16, BASE_Y + 12, true);
     chip.baseLost();
+    chip.whimper();
     this.shake = 14;
     this.flashT = 0.8;
     this.hitStop = 0.1;
@@ -764,8 +857,18 @@ export class Engine {
     this.queue = buildWave(this.stage);
     this.spawnCount = 0;
     this.spawnT = 0.4;
+    this.stageTime = 0;
+    this.shotsFired = 0;
+    this.shotsHit = 0;
+    this.comboN = 0;
+    this.comboT = 0;
+    this.danger = 0;
+    this.night = isNight(this.stage);
     this.spawnPlayer();
     this.state = "playing";
+    if (this.night) {
+      this.popups.push({ x: FIELD / 2, y: 70, text: "НОЧНОЙ БОЙ", life: 1.6, maxLife: 1.6, color: "#8fb8e8", big: true });
+    }
     this.pushHud();
   }
 
@@ -783,7 +886,8 @@ export class Engine {
     }
     if (!spot) { this.queue.unshift(kind); this.spawnT = 0.8; return; }
     const st = ENEMY_STATS[kind];
-    const speedMul = 1 + Math.min(0.3, (this.stage - 1) * 0.035);
+    const diff = DIFF[this.difficulty];
+    const speedMul = (1 + Math.min(0.3, (this.stage - 1) * 0.035)) * diff.speedMul;
     const t: Tank = {
       id: this.nextId++, isPlayer: false, kind,
       x: spot[0], y: spot[1], dir: 2, vx: 0, vy: 0,
@@ -793,7 +897,7 @@ export class Engine {
     };
     this.spawnCount++;
     this.tanks.push(t);
-    this.spawnT = Math.max(1.1, 2.3 - this.stage * 0.12);
+    this.spawnT = Math.max(1.1, 2.3 - this.stage * 0.12) * diff.spawnMul;
     chip.spawnTick();
     this.pushHud();
   }
@@ -923,7 +1027,21 @@ export class Engine {
       killed: { ...this.kills },
       gameOverReason: this.gameOverReason,
       newRecord: this.newRecord,
+      difficulty: this.difficulty,
+      musicOn: chip.musicEnabled,
+      danger: this.danger,
+      stageTime: Math.ceil(this.stageTime),
+      accuracy: this.shotsFired > 0 ? Math.round((100 * this.shotsHit) / this.shotsFired) : 0,
+      bestStage: this.bestStage,
+      combo: this.comboN,
+      night: this.night,
     });
+    chip.setMusic(
+      this.state === "menu" ||
+      this.state === "intermission" ||
+      this.state === "playing" ||
+      this.state === "stageclear",
+    );
   }
 
   /* ============================ рендер ============================ */
@@ -945,6 +1063,27 @@ export class Engine {
     this.drawBullets(ctx);
     this.drawTerrain(ctx, true);
     this.drawPowerup(ctx);
+
+    /* ночная темнота с кругом света вокруг игрока */
+    if (this.night && this.state !== "menu" && this.state !== "intermission") {
+      const pl = this.player;
+      if (pl && pl.alive) this.lastLight = [pl.x + 16, pl.y + 16];
+      const [lx, ly] = this.lastLight;
+      ctx.fillStyle = "rgba(8,12,34,0.28)";
+      ctx.fillRect(0, 0, FIELD, FIELD);
+      const g = ctx.createRadialGradient(lx, ly, 26, lx, ly, 150);
+      g.addColorStop(0, "rgba(4,6,20,0)");
+      g.addColorStop(0.55, "rgba(4,6,20,0.55)");
+      g.addColorStop(1, "rgba(3,4,14,0.93)");
+      ctx.fillStyle = g;
+      ctx.fillRect(0, 0, FIELD, FIELD);
+      /* луна */
+      ctx.fillStyle = "rgba(230,238,220,0.85)";
+      ctx.fillRect(FIELD - 34, 10, 10, 10);
+      ctx.fillStyle = "rgba(230,238,220,0.3)";
+      ctx.fillRect(FIELD - 30, 6, 8, 4);
+      ctx.fillRect(FIELD - 38, 14, 4, 4);
+    }
 
     /* частицы, кольца, всплывашки */
     for (const p of this.particles) {
@@ -1063,7 +1202,15 @@ export class Engine {
     ctx.fillRect(BASE_X - 2, BASE_Y - 2, TANK + 4, TANK + 4);
     ctx.fillStyle = "#2a3320";
     ctx.fillRect(BASE_X - 2, BASE_Y - 2, TANK + 4, 2);
-    drawChihuahua(ctx, BASE_X, BASE_Y, { alive: this.baseAlive, t: this.time });
+    const mood: ChiMood = !this.baseAlive
+      ? "calm"
+      : this.state === "stageclear"
+        ? "happy"
+        : this.danger > 0.35
+          ? "danger"
+          : "calm";
+    const hop = mood === "happy" ? Math.abs(Math.sin(this.time * 7)) * -3 : 0;
+    drawChihuahua(ctx, BASE_X, BASE_Y + hop, { alive: this.baseAlive, t: this.time, mood });
     /* мигание укреплений, когда лопата заканчивается */
     if (this.shovelT > 0 && this.shovelT < 3 && Math.floor(this.time * 6) % 2 === 0) {
       ctx.globalAlpha = 0.5;
