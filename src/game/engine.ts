@@ -91,7 +91,7 @@ const DY = [-1, 0, 1, 0];
 
 const T_EMPTY = 0, T_BRICK = 1, T_STEEL = 2, T_WATER = 3, T_FOREST = 4, T_ICE = 5;
 
-const BASE_X = 192, BASE_Y = 384;            // штаб-чихуахуа, 32×32
+const BASE_X = 192, BASE_Y = 384;            // штаб: чихуахуа Топа, 32×32
 const RING: Array<[number, number]> = [
   [11, 23], [12, 23], [13, 23], [14, 23],
   [11, 24], [11, 25], [14, 24], [14, 25],
@@ -732,7 +732,7 @@ export class Engine {
         return;
       }
     }
-    /* вражеский снаряд свистит рядом со штабом — чихуахуа предупреждает */
+    /* вражеский снаряд свистит рядом со штабом — Топа предупреждает */
     if (!b.fromPlayer) {
       const d = Math.hypot(b.x - (BASE_X + 16), b.y - (BASE_Y + 16));
       if (d < 46) this.fortressAlarm();

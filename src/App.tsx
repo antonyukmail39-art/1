@@ -119,8 +119,8 @@ function MenuScreen({ hud, onStart, onDiff }: { hud: HudSnapshot; onStart: () =>
           </div>
         </div>
         <p className="mt-4 max-w-[340px] text-center text-[13px] leading-relaxed text-armor-300">
-          Волна из <b className="text-flare-300">20 машин</b> прёт на штаб. В штабе — чихуахуа.
-          Чихуахуа <b className="text-alert-400">нельзя</b> травмировать. Остальное — можно.
+          Волна из <b className="text-flare-300">20 машин</b> прёт на штаб. В штабе — чихуахуа по имени <b className="text-hull-300">Топа</b>.
+          Топу <b className="text-alert-400">нельзя</b> травмировать. Остальное — можно.
         </p>
       </div>
       <button
@@ -210,7 +210,7 @@ function StageClearScreen({ hud, onNext }: { hud: HudSnapshot; onNext: () => voi
     <div className="absolute inset-0 z-20 flex flex-col items-center justify-center bg-[rgba(5,6,3,0.9)] fade-in px-6">
       <div className="pop-in w-full max-w-[300px] border border-armor-600 bg-armor-900/90 p-5">
         <div className="font-display text-center text-xl tracking-[0.2em] text-flare-400">ЭТАП {hud.stage} ПРОЙДЕН</div>
-        <div className="mt-1 text-center text-[11px] tracking-widest text-armor-400">ЧИХУАХУА В ПОРЯДКЕ. ПОКА ЧТО.</div>
+        <div className="mt-1 text-center text-[11px] tracking-widest text-armor-400">ТОПА В ПОРЯДКЕ. ПОКА ЧТО.</div>
         <div className="mt-4 space-y-1.5 text-[13px]">
           {kinds.map((k) => (
             <div key={k} className="flex items-center justify-between border-b border-armor-800 pb-1">
@@ -253,8 +253,8 @@ function GameOverScreen({ hud, onRestart, onMenu }: { hud: HudSnapshot; onRestar
         </div>
         <div className="mt-2 text-[13px] text-armor-300">
           {hud.gameOverReason === "base"
-            ? "Штаб разбит. Чихуахуа эвакуирован в слезах."
-            : "Экипаж исчерпан. Чихуахуа скорбит."}
+            ? "Штаб разбит. Топа эвакуирована в слезах."
+            : "Экипаж исчерпан. Топа скорбит."}
         </div>
         <div className="mt-5 flex items-center justify-center gap-8 font-display">
           <div>
@@ -562,7 +562,7 @@ export default function App() {
             <div className="mt-4 flex items-center justify-center gap-2 border border-armor-700 bg-armor-950/60 py-2">
               <ChiPixel size={44} alive={hud.gameOverReason !== "base"} />
               <div className="text-[10px] leading-tight text-armor-400">
-                ОБЪЕКТ «ЧИХУАХУА»<br />
+                ОБЪЕКТ «ТОПА»<br />
                 <span className={`font-display tracking-widest ${hud.gameOverReason === "base" ? "text-alert-400" : "text-flare-300"}`}>
                   {hud.gameOverReason === "base" ? "УТРАЧЕН" : "ПОД ЗАЩИТОЙ"}
                 </span>
